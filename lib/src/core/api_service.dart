@@ -21,6 +21,8 @@ class ApiService {
     _token = token;
   }
 
+  //valor por default para el desplegado
+  //https://backendp2-production.up.railway.app/api
   static String _resolveBaseUrl() {
     final envUrl = const String.fromEnvironment(
       'API_URL',
