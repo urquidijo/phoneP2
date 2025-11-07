@@ -402,7 +402,7 @@ class _CartPageState extends State<CartPage> {
                   ),
                 ],
 
-                // ====== NUEVO: Vista previa del producto detectado ======
+                // ====== VISTA PREVIA DEL PRODUCTO DETECTADO (FIX OVERFLOW) ======
                 if (_previewProduct != null) ...[
                   const SizedBox(height: 12),
                   _ProductPreviewTile(
@@ -704,92 +704,153 @@ class _ProductPreviewTile extends StatelessWidget {
     final theme = Theme.of(context);
     final String? imageUrl = product.imagen;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant.withOpacity(.4),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: imageUrl != null && imageUrl.isNotEmpty
-                ? Image.network(
-                    imageUrl,
-                    width: 56,
-                    height: 56,
-                    fit: BoxFit.cover,
-                  )
-                : Container(
-                    width: 56,
-                    height: 56,
-                    color: theme.colorScheme.surfaceVariant,
-                    child: Icon(
-                      Icons.image_outlined,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool compact = constraints.maxWidth < 360; // modo angosto
+
+        Widget image = ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: imageUrl != null && imageUrl.isNotEmpty
+              ? Image.network(
+                  imageUrl,
+                  width: 56,
+                  height: 56,
+                  fit: BoxFit.cover,
+                )
+              : Container(
+                  width: 56,
+                  height: 56,
+                  color: theme.colorScheme.surfaceVariant,
+                  child: Icon(
+                    Icons.image_outlined,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
+                ),
+        );
+
+        // Bloque de precios: Wrap para que no desborde si hay precio tachado + actual + xQty
+        final List<Widget> priceChips = [
+          if (product.activeDiscount?.estaActivo ?? false)
+            Text(
+              currencyFormatter.format(product.precio),
+              style: const TextStyle(
+                decoration: TextDecoration.lineThrough,
+                fontSize: 12,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          Text(
+            currencyFormatter.format(product.effectivePrice),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  product.nombre,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyLarge?.copyWith(
+          Text('x$qty', style: theme.textTheme.bodySmall),
+        ];
+
+        final Widget prices = compact
+            ? Wrap(spacing: 6, runSpacing: 2, children: priceChips)
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...priceChips.expand((w) sync* {
+                    yield w;
+                    if (w != priceChips.last) yield const SizedBox(width: 8);
+                  }),
+                ],
+              );
+
+        final infoColumn = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              product.nombre,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            prices,
+            if (wasAction)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'Comando aplicado',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Row(
+              ),
+          ],
+        );
+
+        // Botón adaptativo
+        final addButton = FilledButton.tonal(
+          onPressed: onAdd,
+          child: const Text('Agregar'),
+        );
+
+        final clearButton = IconButton(
+          onPressed: onClear,
+          icon: const Icon(Icons.close_rounded),
+          tooltip: 'Ocultar',
+        );
+
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceVariant.withOpacity(.4),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: compact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (product.activeDiscount?.estaActivo ?? false) ...[
-                      Text(
-                        currencyFormatter.format(product.precio),
-                        style: const TextStyle(
-                          decoration: TextDecoration.lineThrough,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Text(
-                      currencyFormatter.format(product.effectivePrice),
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    Row(
+                      children: [
+                        image,
+                        const SizedBox(width: 10),
+                        Expanded(child: infoColumn),
+                      ],
                     ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: wasAction
+                          ? clearButton
+                          : SizedBox(
+                              width: double
+                                  .infinity, // full width en móvil angosto
+                              child: addButton,
+                            ),
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    image,
+                    const SizedBox(width: 10),
+                    Expanded(child: infoColumn),
                     const SizedBox(width: 8),
-                    Text('x$qty', style: theme.textTheme.bodySmall),
+                    if (!wasAction)
+                      // Evita overflow ajustando el botón a su contenido
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minWidth: 96),
+                          child: addButton,
+                        ),
+                      )
+                    else
+                      clearButton,
                   ],
                 ),
-                if (wasAction)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      'Comando aplicado',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (!wasAction)
-            FilledButton.tonal(onPressed: onAdd, child: const Text('Agregar'))
-          else
-            IconButton(
-              onPressed: onClear,
-              icon: const Icon(Icons.close_rounded),
-              tooltip: 'Ocultar',
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

@@ -16,11 +16,7 @@ import 'state/session_controller.dart';
 import 'widgets/push_banner.dart';
 
 class ElectroStoreApp extends StatelessWidget {
-  const ElectroStoreApp({
-    super.key,
-    required this.session,
-    required this.cart,
-  });
+  const ElectroStoreApp({super.key, required this.session, required this.cart});
 
   final SessionController session;
   final CartController cart;
@@ -33,17 +29,19 @@ class ElectroStoreApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: cart),
       ],
       child: MaterialApp(
-        title: 'ElectroStore movil',
+        title: 'ElectroStore móvil',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
           useMaterial3: true,
+          appBarTheme: const AppBarTheme(centerTitle: false),
         ),
         routes: {
           '/': (_) => const MainShell(),
           '/auth': (_) => const AuthPage(),
         },
-        builder: (context, child) => PushMessageBanner(child: child ?? const SizedBox.shrink()),
+        builder: (context, child) =>
+            PushMessageBanner(child: child ?? const SizedBox.shrink()),
       ),
     );
   }
@@ -108,6 +106,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _resetReminderFlags();
     }
     _wasAuthenticated = isAuthenticated;
+    setState(() {}); // refresca avatar/menu
   }
 
   void _resetReminderFlags() {
@@ -126,96 +125,189 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     try {
       final discounts = await _api.fetchActiveDiscounts();
       if (!_discountReminderShown && discounts.isNotEmpty) {
-        await NotificationService.instance.showDiscountReminder(discounts.length);
+        await NotificationService.instance.showDiscountReminder(
+          discounts.length,
+        );
         _discountReminderShown = true;
       }
     } catch (_) {
-      // Ignoramos errores de red para no interrumpir la experienca.
+      // Ignoramos errores de red
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final session = context.watch<SessionController>();
-    final destinations = <_ShellDestination>[
-      _ShellDestination(
-        id: 'home',
-        destination: const NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Inicio'),
-        child: const HomePage(),
-      ),
-      _ShellDestination(
-        id: 'cart',
-        destination:
-            const NavigationDestination(icon: Icon(Icons.shopping_cart_outlined), label: 'Carrito'),
-        child: const CartPage(),
-      ),
-      _ShellDestination(
-        id: 'discounts',
-        destination:
-            const NavigationDestination(icon: Icon(Icons.percent_outlined), label: 'Ofertas'),
-        child: const DiscountsPage(),
-      ),
-      _ShellDestination(
-        id: 'invoices',
-        destination: const NavigationDestination(icon: Icon(Icons.receipt_long), label: 'Facturas'),
-        child: const InvoicesPage(),
-      ),
-    ];
+    final cart = context.watch<CartController>();
+    final cartCount = cart.items.length;
 
-    if (session.user?.isAdmin ?? false) {
-      destinations.add(
-        _ShellDestination(
-          id: 'admin',
-          destination: const NavigationDestination(icon: Icon(Icons.shield), label: 'Admin'),
-          child: const AdminPage(),
-        ),
-      );
-    }
+    final destinations = _buildDestinations(
+      context,
+      cartCount,
+      isAdmin: session.user?.isAdmin ?? false,
+    );
 
     final idIndex = {
       for (var i = 0; i < destinations.length; i++) destinations[i].id: i,
     };
 
-    if (_index >= destinations.length) {
-      _index = 0;
-    }
+    if (_index >= destinations.length) _index = 0;
+
+    // Debug: estado de sesión
+    debugPrint(
+      'isAuth=${session.isAuthenticated} user=${session.user?.username ?? "null"}',
+    );
 
     return ShellNavigationScope(
       idIndex: idIndex,
       onNavigate: (id) {
         final idx = idIndex[id];
-        if (idx != null) {
-          setState(() => _index = idx);
-        }
+        if (idx != null) setState(() => _index = idx);
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('ElectroStore movil'),
-          actions: [
-            if (!session.isAuthenticated)
-              TextButton(
-                onPressed: () => Navigator.of(context).pushNamed('/auth'),
-                child: const Text('Iniciar sesion'),
-              )
-            else
-              TextButton(
-                onPressed: session.logout,
-                child: const Text('Cerrar sesion'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 360;
+
+          return Scaffold(
+            appBar: AppBar(
+              titleSpacing: 16,
+              // Título que no tapa las actions
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.electric_bolt_rounded, size: 22),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'ElectroStore',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-          ],
-        ),
-        body: IndexedStack(
-          index: _index,
-          children: destinations.map((entry) => entry.child).toList(),
-        ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _index,
-          destinations: destinations.map((entry) => entry.destination).toList(),
-          onDestinationSelected: (value) => setState(() => _index = value),
-        ),
+              actions: [
+                // Botón visible si no hay sesión o user
+                if (!(session.isAuthenticated) || session.user == null)
+                  IconButton(
+                    tooltip: 'Iniciar sesión',
+                    onPressed: () => Navigator.of(context).pushNamed('/auth'),
+                    icon: const Icon(Icons.login_rounded),
+                  )
+                else
+                  _AccountMenu(
+                    username: session.user?.username ?? 'Usuario',
+                    onLogout: session.logout,
+                  ),
+                const SizedBox(width: 4),
+              ],
+            ),
+            body: SafeArea(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: IndexedStack(
+                  key: ValueKey(destinations.length),
+                  index: _index,
+                  children: destinations.map((e) => e.child).toList(),
+                ),
+              ),
+            ),
+            bottomNavigationBar: SafeArea(
+              top: false,
+              child: NavigationBar(
+                selectedIndex: _index,
+                labelBehavior: isNarrow
+                    ? NavigationDestinationLabelBehavior.alwaysHide
+                    : NavigationDestinationLabelBehavior.alwaysShow,
+                destinations: destinations.map((e) => e.destination).toList(),
+                onDestinationSelected: (value) =>
+                    setState(() => _index = value),
+              ),
+            ),
+            // 🧹 FAB del carrito eliminado como pediste
+          );
+        },
       ),
     );
   }
+
+  List<_ShellDestination> _buildDestinations(
+    BuildContext context,
+    int cartCount, {
+    required bool isAdmin,
+  }) {
+    final badgeColor = Theme.of(context).colorScheme.error;
+    final cartIcon = cartCount > 0
+        ? Badge.count(
+            count: cartCount,
+            backgroundColor: badgeColor,
+            textColor: Theme.of(context).colorScheme.onError,
+            smallSize: 18,
+            child: const Icon(Icons.shopping_cart_outlined),
+          )
+        : const Icon(Icons.shopping_cart_outlined);
+
+    final base = <_ShellDestination>[
+      _ShellDestination(
+        id: 'home',
+        destination: const NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home),
+          label: 'Inicio',
+        ),
+        child: const HomePage(),
+      ),
+      _ShellDestination(
+        id: 'cart',
+        destination: NavigationDestination(
+          icon: cartIcon,
+          selectedIcon: cartIcon,
+          label: 'Carrito',
+        ),
+        child: const CartPage(),
+      ),
+      _ShellDestination(
+        id: 'discounts',
+        destination: const NavigationDestination(
+          icon: Icon(Icons.percent_outlined),
+          selectedIcon: Icon(Icons.percent),
+          label: 'Ofertas',
+        ),
+        child: const DiscountsPage(),
+      ),
+      _ShellDestination(
+        id: 'invoices',
+        destination: const NavigationDestination(
+          icon: Icon(Icons.receipt_long_outlined),
+          selectedIcon: Icon(Icons.receipt_long),
+          label: 'Facturas',
+        ),
+        child: const InvoicesPage(),
+      ),
+    ];
+
+    if (isAdmin) {
+      base.add(
+        _ShellDestination(
+          id: 'admin',
+          destination: const NavigationDestination(
+            icon: Icon(Icons.shield_outlined),
+            selectedIcon: Icon(Icons.shield),
+            label: 'Admin',
+          ),
+          child: const AdminPage(),
+        ),
+      );
+    }
+    return base;
+  }
+
+  // static String _capCount(int n) => n > 99 ? '99+' : (n > 9 ? '9+' : '$n');
 }
 
 class _ShellDestination {
@@ -228,4 +320,71 @@ class _ShellDestination {
   final String id;
   final NavigationDestination destination;
   final Widget child;
+}
+
+class _AccountMenu extends StatelessWidget {
+  const _AccountMenu({required this.username, required this.onLogout});
+
+  final String username;
+  final VoidCallback onLogout;
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty) return 'U';
+    if (parts.length == 1) return parts.first.characters.first.toUpperCase();
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = CircleAvatar(
+      radius: 14,
+      child: Text(
+        _initials(username),
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+      ),
+    );
+
+    return PopupMenuButton<String>(
+      tooltip: 'Cuenta',
+      position: PopupMenuPosition.under,
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Row(
+            children: [
+              avatar,
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  username,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'logout',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.logout_rounded),
+            title: Text('Cerrar sesión'),
+          ),
+        ),
+      ],
+      onSelected: (value) {
+        if (value == 'logout') onLogout();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: avatar,
+      ),
+    );
+  }
 }
