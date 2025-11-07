@@ -26,7 +26,7 @@ class ApiService {
   static String _resolveBaseUrl() {
     final envUrl = const String.fromEnvironment(
       'API_URL',
-      defaultValue: 'http://10.0.2.2:8000/api/',
+      defaultValue: 'https://web-production-a6f44.up.railway.app/api/',
     );
     if (kIsWeb) return envUrl;
     if (Platform.isAndroid && envUrl.contains('127.0.0.1')) {
