@@ -250,8 +250,8 @@ class _CartPageState extends State<CartPage> {
               ),
             )
             .toList(),
-        successUrl: 'https://electrostore-mobile-success.example',
-        cancelUrl: 'https://electrostore-mobile-cancel.example',
+        successUrl: 'https://frontend-p2.vercel.app/?payment=success',
+        cancelUrl: 'https://frontend-p2.vercel.app/?payment=cancel',
       );
       final checkout = await _api.createCheckoutSession(payload);
       if (!context.mounted) return;
