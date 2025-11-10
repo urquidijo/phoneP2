@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -18,7 +20,7 @@ class CartPage extends StatefulWidget {
   State<CartPage> createState() => _CartPageState();
 }
 
-class _CartPageState extends State<CartPage> {
+class _CartPageState extends State<CartPage> with WidgetsBindingObserver {
   final ApiService _api = ApiService.instance;
   final TextEditingController _commandController = TextEditingController();
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -27,31 +29,74 @@ class _CartPageState extends State<CartPage> {
   bool _isListening = false;
   bool _loadingCatalog = true;
 
+  // === estados de sync con servidor ===
+  bool _isHydrating = false; // evita sync durante hidratación/limpieza forzada
+  Timer? _syncDebounce; // debounce para POST /carritos/actual/
+
   String? _feedback;
   List<Product> _catalog = const [];
 
-  // === NUEVO: vista previa del producto detectado ===
+  // Vista previa
   Product? _previewProduct;
   int _previewQty = 1;
-  bool _previewWasAction = false; // muestra “agregado/removido”
+  bool _previewWasAction = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadCatalog();
     _initSpeech();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _hydrateFromServerIfNeeded();
+      _attachCartListenerForSync();
+    });
   }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _commandController.dispose();
+    _speech.stop();
+    _syncDebounce?.cancel();
+    final cart = context.read<CartController>();
+    cart.removeListener(_onCartChanged);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _onAppResumed();
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    final cartBefore = List.of(context.read<CartController>().items);
+    await _hydrateFromServerIfNeeded();
+    if (!mounted) return;
+    final cart = context.read<CartController>();
+    final seVacio = cartBefore.isNotEmpty && cart.isEmpty;
+    if (seVacio) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pago confirmado. Carrito vaciado.')),
+      );
+    }
+    setState(() {});
+  }
+
+  /* ======================= CATALOGO + VOZ ======================= */
 
   Future<void> _loadCatalog() async {
     try {
       final products = await _api.fetchProducts();
-      if (!context.mounted) return;
+      if (!mounted) return;
       setState(() {
         _catalog = products;
         _loadingCatalog = false;
       });
     } catch (error) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       setState(() {
         _feedback = 'No pudimos cargar el catálogo para comandos por voz.';
         _loadingCatalog = false;
@@ -61,22 +106,171 @@ class _CartPageState extends State<CartPage> {
 
   Future<void> _initSpeech() async {
     final available = await _speech.initialize();
-    if (!context.mounted) return;
+    if (!mounted) return;
     setState(() => _speechAvailable = available);
   }
 
-  @override
-  void dispose() {
-    _commandController.dispose();
-    _speech.stop();
-    super.dispose();
+  /* ======================= HIDRATAR Y SINCRONIZAR ======================= */
+
+  void _attachCartListenerForSync() {
+    final cart = context.read<CartController>();
+    cart.addListener(_onCartChanged);
   }
+
+  void _onCartChanged() {
+    if (_isHydrating) return;
+    final session = context.read<SessionController>();
+    if (!session.isAuthenticated) return;
+    _scheduleSync();
+  }
+
+  void _scheduleSync() {
+    _syncDebounce?.cancel();
+    _syncDebounce = Timer(const Duration(milliseconds: 500), () {
+      _syncServerCartFromLocal();
+    });
+  }
+
+  Future<void> _hydrateFromServerIfNeeded() async {
+    final session = context.read<SessionController>();
+    final cart = context.read<CartController>();
+
+    if (!session.isAuthenticated) return;
+
+    try {
+      _isHydrating = true;
+      final serverCart = await _api.fetchCurrentCart();
+
+      if (serverCart.detalles.isNotEmpty) {
+        cart.clear();
+        for (final d in serverCart.detalles) {
+          cart.add(d.producto, quantity: d.cantidad);
+        }
+      } else if (!cart.isEmpty) {
+        await _syncServerCartFromLocal();
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No pudimos cargar tu carrito remoto (${e.message}). Inicia sesión nuevamente.',
+          ),
+          action: SnackBarAction(
+            label: 'Login',
+            onPressed: () => Navigator.of(context).pushNamed('/auth'),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error cargando tu carrito remoto.')),
+      );
+    } finally {
+      _isHydrating = false;
+    }
+  }
+
+  Future<void> _syncServerCartFromLocal() async {
+    final session = context.read<SessionController>();
+    if (!session.isAuthenticated) return;
+
+    final cart = context.read<CartController>();
+    final payload = CartSyncPayload(
+      items: cart.items
+          .map(
+            (it) => CartSyncItemPayload(
+              productId: it.product.id,
+              quantity: it.quantity,
+            ),
+          )
+          .toList(),
+    );
+
+    try {
+      await _api.syncCart(payload);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No pudimos sincronizar tu carrito (${e.message}).'),
+          action: SnackBarAction(
+            label: 'Login',
+            onPressed: () => Navigator.of(context).pushNamed('/auth'),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al sincronizar tu carrito.')),
+      );
+    }
+  }
+
+  // === NUEVO: limpieza forzada DESPUÉS de crear la sesión (no bloquea la compra)
+  Future<void> _clearBackendCartAfterSessionCreated() async {
+    final session = context.read<SessionController>();
+    final cart = context.read<CartController>();
+    if (!session.isAuthenticated) return;
+
+    _syncDebounce?.cancel();
+    final prevHydrating = _isHydrating;
+    _isHydrating = true;
+
+    // Limpio LOCAL primero (UX inmediata)
+    cart.clear();
+    setState(() {});
+
+    try {
+      // Vacío también en BACKEND (envío items vacíos)
+      final emptyPayload = CartSyncPayload(items: const []);
+      await _api.syncCart(emptyPayload);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      // No interrumpimos el flujo de pago
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo vaciar el carrito en el servidor (${e.message}).',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Fallo al vaciar carrito en el servidor.'),
+        ),
+      );
+    } finally {
+      _isHydrating = prevHydrating;
+    }
+  }
+
+  /* ======================= PULL-TO-REFRESH ======================= */
+
+  Future<void> _refreshAll() async {
+    try {
+      final products = await _api.fetchProducts();
+      if (mounted) {
+        setState(() {
+          _catalog = products;
+        });
+      }
+    } catch (_) {}
+    await _hydrateFromServerIfNeeded();
+    if (mounted) setState(() {});
+  }
+
+  /* ======================= COMANDOS POR VOZ/TEXTO ======================= */
 
   Future<void> _toggleListening() async {
     if (!_speechAvailable) return;
     if (_isListening) {
       await _speech.stop();
-      if (!context.mounted) return;
+      if (!mounted) return;
       setState(() => _isListening = false);
     } else {
       final started = await _speech.listen(
@@ -85,14 +279,14 @@ class _CartPageState extends State<CartPage> {
           listenMode: stt.ListenMode.confirmation,
         ),
         onResult: (result) {
-          if (!context.mounted) return;
+          if (!mounted) return;
           setState(() => _commandController.text = result.recognizedWords);
           if (result.finalResult) {
             _interpretCommand(result.recognizedWords, fromVoice: true);
           }
         },
       );
-      if (!context.mounted) return;
+      if (!mounted) return;
       setState(() => _isListening = started);
     }
   }
@@ -114,7 +308,6 @@ class _CartPageState extends State<CartPage> {
     final normalized = command.toLowerCase().trim();
     if (normalized.isEmpty) return;
 
-    // reset preview state
     _clearPreview();
 
     if (normalized.contains('limpiar')) {
@@ -133,14 +326,12 @@ class _CartPageState extends State<CartPage> {
         ? int.parse(quantityMatch.group(1)!)
         : 1;
 
-    // extraer nombre “aproximado”
     String clean(String s) => s
         .replaceAll(RegExp(r'\b(agregar|añadir|anadir|quitar|remover)\b'), '')
         .replaceAll(quantityMatch?.group(0) ?? '', '')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
 
-    // estrategia: buscar por startsWith, luego contains
     Product? _findProduct(String q) {
       if (q.isEmpty) return null;
       final byStart = _catalog
@@ -167,7 +358,6 @@ class _CartPageState extends State<CartPage> {
         _setFeedback('No encontramos $pname', fromVoice: fromVoice);
         return;
       }
-      // Vista previa + acción inmediata
       cart.add(product, quantity: quantity);
       setState(() {
         _previewProduct = product;
@@ -178,6 +368,7 @@ class _CartPageState extends State<CartPage> {
         'Agregamos ${product.nombre} x$quantity',
         fromVoice: fromVoice,
       );
+      _scheduleSync();
       return;
     }
 
@@ -195,7 +386,6 @@ class _CartPageState extends State<CartPage> {
         _setFeedback('No encontramos ese producto', fromVoice: fromVoice);
         return;
       }
-      // Vista previa de lo que quitamos
       context.read<CartController>().remove(product.id);
       setState(() {
         _previewProduct = product;
@@ -203,6 +393,7 @@ class _CartPageState extends State<CartPage> {
         _previewWasAction = true;
       });
       _setFeedback('Quitamos ${product.nombre}', fromVoice: fromVoice);
+      _scheduleSync();
       return;
     }
 
@@ -214,6 +405,7 @@ class _CartPageState extends State<CartPage> {
     final cart = context.read<CartController>();
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+
     if (!session.isAuthenticated) {
       messenger.showSnackBar(
         SnackBar(
@@ -233,6 +425,17 @@ class _CartPageState extends State<CartPage> {
       return;
     }
 
+    // Tomo un snapshot de items ANTES de modificar nada
+    final itemsSnapshot = cart.items
+        .map(
+          (item) => CheckoutItemPayload(
+            productId: item.product.id,
+            quantity: item.quantity,
+          ),
+        )
+        .toList();
+
+    // Loader
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -240,22 +443,24 @@ class _CartPageState extends State<CartPage> {
     );
 
     try {
+      // 1) Creo la sesión de checkout con el snapshot (Stripe ya tiene las líneas)
       final payload = CheckoutPayload(
         usuarioId: session.user!.id,
-        items: cart.items
-            .map(
-              (item) => CheckoutItemPayload(
-                productId: item.product.id,
-                quantity: item.quantity,
-              ),
-            )
-            .toList(),
-        successUrl: 'https://frontend-p2.vercel.app/?payment=success',
-        cancelUrl: 'https://frontend-p2.vercel.app/?payment=cancel',
+        items: itemsSnapshot,
+        successUrl:
+            'https://frontend-p2.vercel.app/checkout/success?session_id={CHECKOUT_SESSION_ID}',
+        cancelUrl: 'https://frontend-p2.vercel.app/checkout/cancel',
       );
+
       final checkout = await _api.createCheckoutSession(payload);
-      if (!context.mounted) return;
-      navigator.pop();
+      if (!mounted) return;
+
+      // 2) Vacío carrito BACKEND + LOCAL inmediatamente (no bloquea si falla)
+      await _clearBackendCartAfterSessionCreated();
+
+      navigator.pop(); // cierro loader
+
+      // 3) Abro Stripe
       final url = checkout.url;
       final uri = Uri.tryParse(url);
       final opened =
@@ -264,8 +469,10 @@ class _CartPageState extends State<CartPage> {
       if (!opened) {
         await launchUrlString(url, mode: LaunchMode.externalApplication);
       }
+
+      // Nota: si cancela en Stripe, el carrito ya quedó vacío (tal como pediste).
     } catch (error) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
         SnackBar(content: Text('Error al iniciar el pago: $error')),
@@ -282,225 +489,236 @@ class _CartPageState extends State<CartPage> {
 
     final theme = Theme.of(context);
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        // ====== CARD COMANDOS / VOZ ======
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          color: theme.colorScheme.surface,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    // Mic con “glow”
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _isListening
-                            ? theme.colorScheme.primary.withOpacity(.12)
-                            : theme.colorScheme.surfaceVariant,
-                        boxShadow: _isListening
-                            ? [
-                                BoxShadow(
-                                  color: theme.colorScheme.primary.withOpacity(
-                                    .35,
-                                  ),
-                                  blurRadius: 14,
-                                  spreadRadius: 1,
-                                ),
-                              ]
-                            : [],
-                      ),
-                      child: Icon(
-                        _isListening
-                            ? Icons.graphic_eq
-                            : Icons.mic_none_rounded,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Comandos rápidos',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (_speechAvailable)
-                      FilledButton.tonalIcon(
-                        onPressed: _toggleListening,
-                        icon: Icon(_isListening ? Icons.stop : Icons.mic),
-                        label: Text(_isListening ? 'Detener' : 'Hablar'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      )
-                    else
-                      Text(
-                        'Voz no disponible',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _commandController,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (v) => _interpretCommand(v),
-                  decoration: InputDecoration(
-                    hintText: 'Ej: agregar 2 laptops / quitar monitor / pagar',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      onPressed: () =>
-                          _interpretCommand(_commandController.text),
-                    ),
-                    filled: true,
-                    fillColor: theme.colorScheme.surfaceVariant.withOpacity(.4),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-                if (_feedback != null) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 16,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _feedback!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-
-                // ====== VISTA PREVIA DEL PRODUCTO DETECTADO (FIX OVERFLOW) ======
-                if (_previewProduct != null) ...[
-                  const SizedBox(height: 12),
-                  _ProductPreviewTile(
-                    product: _previewProduct!,
-                    qty: _previewQty,
-                    wasAction: _previewWasAction,
-                    onClear: _clearPreview,
-                    onAdd: () {
-                      context.read<CartController>().add(
-                        _previewProduct!,
-                        quantity: _previewQty,
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '${_previewProduct!.nombre} agregado x$_previewQty',
-                          ),
-                          behavior: SnackBarBehavior.floating,
-                          margin: const EdgeInsets.all(16),
-                        ),
-                      );
-                      setState(() => _previewWasAction = true);
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // ====== LISTA DEL CARRITO ======
-        if (cart.isEmpty)
-          _EmptyCartState(theme: theme)
-        else ...[
-          ...cart.items.map(
-            (item) => _CartItemTile(
-              product: item.product,
-              quantity: item.quantity,
-              onRemove: () => cart.remove(item.product.id),
-              onInc: () =>
-                  cart.updateQuantity(item.product.id, item.quantity + 1),
-              onDec: () {
-                final next = (item.quantity - 1).clamp(1, 999);
-                cart.updateQuantity(item.product.id, next);
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
+    return RefreshIndicator(
+      onRefresh: _refreshAll,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          // ====== CARD COMANDOS / VOZ ======
           Card(
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
+            color: theme.colorScheme.surface,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               child: Column(
                 children: [
                   Row(
                     children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isListening
+                              ? theme.colorScheme.primary.withOpacity(.12)
+                              : theme.colorScheme.surfaceVariant,
+                          boxShadow: _isListening
+                              ? [
+                                  BoxShadow(
+                                    color: theme.colorScheme.primary
+                                        .withOpacity(.35),
+                                    blurRadius: 14,
+                                    spreadRadius: 1,
+                                  ),
+                                ]
+                              : [],
+                        ),
+                        child: Icon(
+                          _isListening
+                              ? Icons.graphic_eq
+                              : Icons.mic_none_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Total',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
+                          'Comandos rápidos',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
-                      Text(
-                        currencyFormatter.format(cart.total),
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
+                      if (_speechAvailable)
+                        FilledButton.tonalIcon(
+                          onPressed: _toggleListening,
+                          icon: Icon(_isListening ? Icons.stop : Icons.mic),
+                          label: Text(_isListening ? 'Detener' : 'Hablar'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        )
+                      else
+                        Text(
+                          'Voz no disponible',
+                          style: theme.textTheme.bodySmall,
                         ),
-                      ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _startCheckout,
-                      icon: const Icon(Icons.lock),
-                      label: const Text('Pagar'),
-                      style: FilledButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _commandController,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (v) => _interpretCommand(v),
+                    decoration: InputDecoration(
+                      hintText:
+                          'Ej: agregar 2 laptops / quitar monitor / pagar',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        onPressed: () =>
+                            _interpretCommand(_commandController.text),
+                      ),
+                      filled: true,
+                      fillColor: theme.colorScheme.surfaceVariant.withOpacity(
+                        .4,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
                       ),
                     ),
                   ),
+                  if (_feedback != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _feedback!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  // Vista previa
+                  if (_previewProduct != null) ...[
+                    const SizedBox(height: 12),
+                    _ProductPreviewTile(
+                      product: _previewProduct!,
+                      qty: _previewQty,
+                      wasAction: _previewWasAction,
+                      onClear: _clearPreview,
+                      onAdd: () {
+                        context.read<CartController>().add(
+                          _previewProduct!,
+                          quantity: _previewQty,
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '${_previewProduct!.nombre} agregado x$_previewQty',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            margin: const EdgeInsets.all(16),
+                          ),
+                        );
+                        setState(() => _previewWasAction = true);
+                        _scheduleSync();
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // ====== LISTA DEL CARRITO ======
+          if (cart.isEmpty)
+            _EmptyCartState(theme: theme)
+          else ...[
+            ...cart.items.map(
+              (item) => _CartItemTile(
+                product: item.product,
+                quantity: item.quantity,
+                onRemove: () {
+                  cart.remove(item.product.id);
+                  _scheduleSync();
+                },
+                onInc: () {
+                  cart.updateQuantity(item.product.id, item.quantity + 1);
+                  _scheduleSync();
+                },
+                onDec: () {
+                  final next = (item.quantity - 1).clamp(1, 999);
+                  cart.updateQuantity(item.product.id, next);
+                  _scheduleSync();
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Total',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          currencyFormatter.format(cart.total),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _startCheckout,
+                        icon: const Icon(Icons.lock),
+                        label: const Text('Pagar'),
+                        style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -568,7 +786,6 @@ class _CartItemTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Miniatura
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: imageUrl != null && imageUrl.isNotEmpty
@@ -589,8 +806,6 @@ class _CartItemTile extends StatelessWidget {
                     ),
             ),
             const SizedBox(width: 12),
-
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -647,7 +862,6 @@ class _CartItemTile extends StatelessWidget {
                 ],
               ),
             ),
-
             IconButton(
               onPressed: onRemove,
               icon: const Icon(Icons.delete_outline),
@@ -706,7 +920,7 @@ class _ProductPreviewTile extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final bool compact = constraints.maxWidth < 360; // modo angosto
+        final bool compact = constraints.maxWidth < 360;
 
         Widget image = ClipRRect(
           borderRadius: BorderRadius.circular(10),
@@ -728,7 +942,6 @@ class _ProductPreviewTile extends StatelessWidget {
                 ),
         );
 
-        // Bloque de precios: Wrap para que no desborde si hay precio tachado + actual + xQty
         final List<Widget> priceChips = [
           if (product.activeDiscount?.estaActivo ?? false)
             Text(
@@ -788,12 +1001,10 @@ class _ProductPreviewTile extends StatelessWidget {
           ],
         );
 
-        // Botón adaptativo
         final addButton = FilledButton.tonal(
           onPressed: onAdd,
           child: const Text('Agregar'),
         );
-
         final clearButton = IconButton(
           onPressed: onClear,
           icon: const Icon(Icons.close_rounded),
@@ -822,11 +1033,7 @@ class _ProductPreviewTile extends StatelessWidget {
                       alignment: Alignment.centerRight,
                       child: wasAction
                           ? clearButton
-                          : SizedBox(
-                              width: double
-                                  .infinity, // full width en móvil angosto
-                              child: addButton,
-                            ),
+                          : SizedBox(width: double.infinity, child: addButton),
                     ),
                   ],
                 )
@@ -837,7 +1044,6 @@ class _ProductPreviewTile extends StatelessWidget {
                     Expanded(child: infoColumn),
                     const SizedBox(width: 8),
                     if (!wasAction)
-                      // Evita overflow ajustando el botón a su contenido
                       FittedBox(
                         fit: BoxFit.scaleDown,
                         child: ConstrainedBox(

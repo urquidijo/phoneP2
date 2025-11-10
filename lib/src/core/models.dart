@@ -3,17 +3,13 @@ import 'dart:convert';
 import '../utils/formatters.dart';
 
 class Category {
-  const Category({
-    required this.id,
-    required this.nombre,
-    this.descripcion,
-  });
+  const Category({required this.id, required this.nombre, this.descripcion});
 
   factory Category.fromJson(Map<String, dynamic> json) => Category(
-        id: json['id'] as int,
-        nombre: json['nombre'] as String,
-        descripcion: json['descripcion'] as String?,
-      );
+    id: json['id'] as int,
+    nombre: json['nombre'] as String,
+    descripcion: json['descripcion'] as String?,
+  );
 
   final int id;
   final String nombre;
@@ -31,7 +27,8 @@ class DiscountSummary {
     required this.estaActivo,
   });
 
-  factory DiscountSummary.fromJson(Map<String, dynamic> json) => DiscountSummary(
+  factory DiscountSummary.fromJson(Map<String, dynamic> json) =>
+      DiscountSummary(
         id: json['id'] as int,
         porcentaje: json['porcentaje'].toString(),
         fechaInicio: json['fecha_inicio'] as String,
@@ -70,22 +67,22 @@ class Product {
   });
 
   factory Product.fromJson(Map<String, dynamic> json) => Product(
-        id: json['id'] as int,
-        nombre: json['nombre'] as String,
-        descripcion: json['descripcion'] as String?,
-        precioRaw: json['precio'].toString(),
-        stock: json['stock'] as int? ?? 0,
-        lowStockThreshold: json['low_stock_threshold'] as int? ?? 0,
-        categoria: json['categoria'] == null
-            ? null
-            : Category.fromJson(json['categoria'] as Map<String, dynamic>),
-        imagen: json['imagen'] as String?,
-        activeDiscount: json['active_discount'] == null
-            ? null
-            : DiscountSummary.fromJson(
-                json['active_discount'] as Map<String, dynamic>,
-              ),
-      );
+    id: json['id'] as int,
+    nombre: json['nombre'] as String,
+    descripcion: json['descripcion'] as String?,
+    precioRaw: json['precio'].toString(),
+    stock: json['stock'] as int? ?? 0,
+    lowStockThreshold: json['low_stock_threshold'] as int? ?? 0,
+    categoria: json['categoria'] == null
+        ? null
+        : Category.fromJson(json['categoria'] as Map<String, dynamic>),
+    imagen: json['imagen'] as String?,
+    activeDiscount: json['active_discount'] == null
+        ? null
+        : DiscountSummary.fromJson(
+            json['active_discount'] as Map<String, dynamic>,
+          ),
+  );
 
   final int id;
   final String nombre;
@@ -127,14 +124,14 @@ class ProductPayload {
   final String? imagen;
 
   Map<String, dynamic> toJson() => {
-        'nombre': nombre,
-        'precio': precio,
-        'stock': stock,
-        if (descripcion != null) 'descripcion': descripcion,
-        if (lowStockThreshold != null) 'low_stock_threshold': lowStockThreshold,
-        if (categoriaId != null) 'categoria_id': categoriaId,
-        if (imagen != null) 'imagen': imagen,
-      };
+    'nombre': nombre,
+    'precio': precio,
+    'stock': stock,
+    if (descripcion != null) 'descripcion': descripcion,
+    if (lowStockThreshold != null) 'low_stock_threshold': lowStockThreshold,
+    if (categoriaId != null) 'categoria_id': categoriaId,
+    if (imagen != null) 'imagen': imagen,
+  };
 }
 
 class ProductDiscount {
@@ -149,7 +146,8 @@ class ProductDiscount {
     required this.producto,
   });
 
-  factory ProductDiscount.fromJson(Map<String, dynamic> json) => ProductDiscount(
+  factory ProductDiscount.fromJson(Map<String, dynamic> json) =>
+      ProductDiscount(
         id: json['id'] as int,
         porcentaje: json['porcentaje'].toString(),
         fechaInicio: json['fecha_inicio'] as String,
@@ -184,11 +182,11 @@ class DiscountPayload {
   final int? productoId;
 
   Map<String, dynamic> toJson() => {
-        'porcentaje': porcentaje,
-        'fecha_inicio': fechaInicio.toIso8601String(),
-        'fecha_fin': fechaFin?.toIso8601String(),
-        if (productoId != null) 'producto_id': productoId,
-      };
+    'porcentaje': porcentaje,
+    'fecha_inicio': fechaInicio.toIso8601String(),
+    'fecha_fin': fechaFin?.toIso8601String(),
+    if (productoId != null) 'producto_id': productoId,
+  };
 }
 
 class User {
@@ -202,13 +200,13 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) => User(
-        id: json['id'] as int,
-        username: json['username'] as String,
-        email: json['email'] as String? ?? '',
-        rol: json['rol'] as int?,
-        rolNombre: json['rol_nombre'] as String?,
-        permisos: (json['permisos'] as List<dynamic>? ?? []).cast<String>(),
-      );
+    id: json['id'] as int,
+    username: json['username'] as String,
+    email: json['email'] as String? ?? '',
+    rol: json['rol'] as int?,
+    rolNombre: json['rol_nombre'] as String?,
+    permisos: (json['permisos'] as List<dynamic>? ?? []).cast<String>(),
+  );
 
   final int id;
   final String username;
@@ -244,16 +242,16 @@ class Invoice {
   });
 
   factory Invoice.fromJson(Map<String, dynamic> json) => Invoice(
-        id: json['id'] as int,
-        usuario: json['usuario'] as int?,
-        stripeInvoiceId: json['stripe_invoice_id'] as String,
-        stripeSessionId: json['stripe_session_id'] as String,
-        amountTotal: double.tryParse(json['amount_total'].toString()) ?? 0.0,
-        currency: json['currency'] as String? ?? 'USD',
-        status: json['status'] as String? ?? 'pending',
-        hostedInvoiceUrl: json['hosted_invoice_url'] as String?,
-        createdAt: json['created_at'] as String,
-      );
+    id: json['id'] as int,
+    usuario: json['usuario'] as int?,
+    stripeInvoiceId: json['stripe_invoice_id'] as String,
+    stripeSessionId: json['stripe_session_id'] as String,
+    amountTotal: double.tryParse(json['amount_total'].toString()) ?? 0.0,
+    currency: json['currency'] as String? ?? 'USD',
+    status: json['status'] as String? ?? 'pending',
+    hostedInvoiceUrl: json['hosted_invoice_url'] as String?,
+    createdAt: json['created_at'] as String,
+  );
 
   final int id;
   final int? usuario;
@@ -273,7 +271,8 @@ class ReportSummaryRow {
     required this.cantidad,
   });
 
-  factory ReportSummaryRow.fromJson(Map<String, dynamic> json) => ReportSummaryRow(
+  factory ReportSummaryRow.fromJson(Map<String, dynamic> json) =>
+      ReportSummaryRow(
         label: json['label'] as String,
         montoTotal: (json['monto_total'] as num).toDouble(),
         cantidad: json['cantidad'] as int? ?? 0,
@@ -295,13 +294,13 @@ class ReportRow {
   });
 
   factory ReportRow.fromJson(Map<String, dynamic> json) => ReportRow(
-        factura: json['factura'] as String,
-        cliente: json['cliente'] as String,
-        producto: json['producto'] as String,
-        cantidad: json['cantidad'] as int? ?? 0,
-        montoTotal: (json['monto_total'] as num).toDouble(),
-        fecha: json['fecha'] as String,
-      );
+    factura: json['factura'] as String,
+    cliente: json['cliente'] as String,
+    producto: json['producto'] as String,
+    cantidad: json['cantidad'] as int? ?? 0,
+    montoTotal: (json['monto_total'] as num).toDouble(),
+    fecha: json['fecha'] as String,
+  );
 
   final String factura;
   final String cliente;
@@ -321,12 +320,12 @@ class ReportMetadata {
   });
 
   factory ReportMetadata.fromJson(Map<String, dynamic> json) => ReportMetadata(
-        groupBy: json['metadata']['group_by'] as String,
-        startDate: json['metadata']['start_date'] as String?,
-        endDate: json['metadata']['end_date'] as String?,
-        format: json['metadata']['format'] as String,
-        prompt: json['metadata']['prompt'] as String,
-      );
+    groupBy: json['metadata']['group_by'] as String,
+    startDate: json['metadata']['start_date'] as String?,
+    endDate: json['metadata']['end_date'] as String?,
+    format: json['metadata']['format'] as String,
+    prompt: json['metadata']['prompt'] as String,
+  );
 
   final String groupBy;
   final String? startDate;
@@ -342,7 +341,8 @@ class ReportScreenResponse {
     required this.rows,
   });
 
-  factory ReportScreenResponse.fromJson(Map<String, dynamic> json) => ReportScreenResponse(
+  factory ReportScreenResponse.fromJson(Map<String, dynamic> json) =>
+      ReportScreenResponse(
         metadata: ReportMetadata(
           groupBy: json['metadata']['group_by'] as String,
           startDate: json['metadata']['start_date'] as String?,
@@ -351,7 +351,9 @@ class ReportScreenResponse {
           prompt: json['metadata']['prompt'] as String,
         ),
         summary: (json['summary'] as List<dynamic>)
-            .map((item) => ReportSummaryRow.fromJson(item as Map<String, dynamic>))
+            .map(
+              (item) => ReportSummaryRow.fromJson(item as Map<String, dynamic>),
+            )
             .toList(),
         rows: (json['rows'] as List<dynamic>)
             .map((item) => ReportRow.fromJson(item as Map<String, dynamic>))
@@ -367,9 +369,9 @@ class SalesPoint {
   const SalesPoint({required this.label, required this.total});
 
   factory SalesPoint.fromJson(Map<String, dynamic> json) => SalesPoint(
-        label: json['label'] as String,
-        total: (json['total'] as num).toDouble(),
-      );
+    label: json['label'] as String,
+    total: (json['total'] as num).toDouble(),
+  );
 
   final String label;
   final double total;
@@ -383,7 +385,8 @@ class SalesHistoryResponse {
     required this.byCategory,
   });
 
-  factory SalesHistoryResponse.fromJson(Map<String, dynamic> json) => SalesHistoryResponse(
+  factory SalesHistoryResponse.fromJson(Map<String, dynamic> json) =>
+      SalesHistoryResponse(
         monthlyTotals: (json['monthly_totals'] as List<dynamic>)
             .map((item) => SalesPoint.fromJson(item as Map<String, dynamic>))
             .toList(),
@@ -412,7 +415,8 @@ class CategoryForecast {
     required this.predictions,
   });
 
-  factory CategoryForecast.fromJson(Map<String, dynamic> json) => CategoryForecast(
+  factory CategoryForecast.fromJson(Map<String, dynamic> json) =>
+      CategoryForecast(
         category: json['category'] as String,
         share: (json['share'] as num).toDouble(),
         historical: (json['historical'] as List<dynamic>)
@@ -442,7 +446,9 @@ class SalesPredictionsResponse {
             .map((item) => SalesPoint.fromJson(item as Map<String, dynamic>))
             .toList(),
         byCategory: (json['by_category'] as List<dynamic>)
-            .map((item) => CategoryForecast.fromJson(item as Map<String, dynamic>))
+            .map(
+              (item) => CategoryForecast.fromJson(item as Map<String, dynamic>),
+            )
             .toList(),
         metadata: (json['metadata'] as Map<String, dynamic>?) ?? const {},
       );
@@ -461,40 +467,41 @@ class CartItem {
   double get subtotal => product.effectivePrice * quantity;
 
   Map<String, dynamic> toJson() => {
-        'product': {
-          'id': product.id,
-          'nombre': product.nombre,
-          'descripcion': product.descripcion,
-          'precio': product.precioRaw,
-          'stock': product.stock,
-          'low_stock_threshold': product.lowStockThreshold,
-          'categoria': product.categoria == null
-              ? null
-              : {
-                  'id': product.categoria!.id,
-                  'nombre': product.categoria!.nombre,
-                  'descripcion': product.categoria!.descripcion,
-                },
-          'imagen': product.imagen,
-          'active_discount': product.activeDiscount == null
-              ? null
-              : {
-                  'id': product.activeDiscount!.id,
-                  'porcentaje': product.activeDiscount!.porcentaje,
-                  'fecha_inicio': product.activeDiscount!.fechaInicio,
-                  'fecha_fin': product.activeDiscount!.fechaFin,
-                  'precio_original': product.activeDiscount!.precioOriginal,
-                  'precio_con_descuento': product.activeDiscount!.precioConDescuento,
-                  'esta_activo': product.activeDiscount!.estaActivo,
-                },
-        },
-        'quantity': quantity,
-      };
+    'product': {
+      'id': product.id,
+      'nombre': product.nombre,
+      'descripcion': product.descripcion,
+      'precio': product.precioRaw,
+      'stock': product.stock,
+      'low_stock_threshold': product.lowStockThreshold,
+      'categoria': product.categoria == null
+          ? null
+          : {
+              'id': product.categoria!.id,
+              'nombre': product.categoria!.nombre,
+              'descripcion': product.categoria!.descripcion,
+            },
+      'imagen': product.imagen,
+      'active_discount': product.activeDiscount == null
+          ? null
+          : {
+              'id': product.activeDiscount!.id,
+              'porcentaje': product.activeDiscount!.porcentaje,
+              'fecha_inicio': product.activeDiscount!.fechaInicio,
+              'fecha_fin': product.activeDiscount!.fechaFin,
+              'precio_original': product.activeDiscount!.precioOriginal,
+              'precio_con_descuento':
+                  product.activeDiscount!.precioConDescuento,
+              'esta_activo': product.activeDiscount!.estaActivo,
+            },
+    },
+    'quantity': quantity,
+  };
 
   factory CartItem.fromJson(Map<String, dynamic> json) => CartItem(
-        product: Product.fromJson(json['product'] as Map<String, dynamic>),
-        quantity: json['quantity'] as int? ?? 1,
-      );
+    product: Product.fromJson(json['product'] as Map<String, dynamic>),
+    quantity: json['quantity'] as int? ?? 1,
+  );
 }
 
 class CheckoutItemPayload {
@@ -504,9 +511,9 @@ class CheckoutItemPayload {
   final int quantity;
 
   Map<String, dynamic> toJson() => {
-        'productId': productId,
-        'quantity': quantity,
-      };
+    'productId': productId,
+    'quantity': quantity,
+  };
 }
 
 class CheckoutPayload {
@@ -523,11 +530,11 @@ class CheckoutPayload {
   final String cancelUrl;
 
   Map<String, dynamic> toJson() => {
-        'usuarioId': usuarioId,
-        'items': items.map((item) => item.toJson()).toList(),
-        'successUrl': successUrl,
-        'cancelUrl': cancelUrl,
-      };
+    'usuarioId': usuarioId,
+    'items': items.map((item) => item.toJson()).toList(),
+    'successUrl': successUrl,
+    'cancelUrl': cancelUrl,
+  };
 }
 
 class CheckoutSessionResponse {
@@ -551,10 +558,10 @@ class ReportPromptPayload {
   final ReportChannel channel;
 
   Map<String, dynamic> toJson() => {
-        'prompt': prompt,
-        'format': format.name,
-        'channel': channel.name,
-      };
+    'prompt': prompt,
+    'format': format.name,
+    'channel': channel.name,
+  };
 }
 
 enum ReportFormat { screen, pdf, excel }
@@ -565,9 +572,9 @@ class AuthResponse {
   const AuthResponse({required this.token, required this.user});
 
   factory AuthResponse.fromJson(Map<String, dynamic> json) => AuthResponse(
-        token: json['token'] as String,
-        user: User.fromJson(json['user'] as Map<String, dynamic>),
-      );
+    token: json['token'] as String,
+    user: User.fromJson(json['user'] as Map<String, dynamic>),
+  );
 
   final String token;
   final User user;
@@ -579,10 +586,7 @@ class LoginPayload {
   final String username;
   final String password;
 
-  Map<String, dynamic> toJson() => {
-        'username': username,
-        'password': password,
-      };
+  Map<String, dynamic> toJson() => {'username': username, 'password': password};
 }
 
 class RegisterPayload {
@@ -597,19 +601,14 @@ class RegisterPayload {
   final String password;
 
   Map<String, dynamic> toJson() => {
-        'username': username,
-        'email': email,
-        'password': password,
-      };
+    'username': username,
+    'email': email,
+    'password': password,
+  };
 }
 
 class AdminUserPayload {
-  AdminUserPayload({
-    this.username,
-    this.email,
-    this.password,
-    this.rol,
-  });
+  AdminUserPayload({this.username, this.email, this.password, this.rol});
 
   final String? username;
   final String? email;
@@ -617,25 +616,99 @@ class AdminUserPayload {
   final int? rol;
 
   Map<String, dynamic> toJson() => {
-        if (username != null) 'username': username,
-        if (email != null) 'email': email,
-        if (password != null) 'password': password,
-        if (rol != null) 'rol': rol,
-      };
+    if (username != null) 'username': username,
+    if (email != null) 'email': email,
+    if (password != null) 'password': password,
+    if (rol != null) 'rol': rol,
+  };
 }
 
 class FileDownload {
-  const FileDownload({required this.bytes, required this.filename, required this.mimeType});
+  const FileDownload({
+    required this.bytes,
+    required this.filename,
+    required this.mimeType,
+  });
 
   final List<int> bytes;
   final String filename;
   final String mimeType;
 
   @override
-  String toString() => 'FileDownload(filename: $filename, bytes: ${bytes.length})';
+  String toString() =>
+      'FileDownload(filename: $filename, bytes: ${bytes.length})';
 }
 
 String encodeBasicAuth(String username, String password) {
   final raw = utf8.encode('$username:$password');
   return base64Encode(raw);
+}
+
+// ===================== CARRITO (API) =====================
+class CartDetail {
+  final Product producto;
+  final int cantidad;
+  final String subtotal;
+
+  CartDetail({
+    required this.producto,
+    required this.cantidad,
+    required this.subtotal,
+  });
+
+  factory CartDetail.fromJson(Map<String, dynamic> json) => CartDetail(
+    producto: Product.fromJson(json['producto'] as Map<String, dynamic>),
+    cantidad: (json['cantidad'] as num).toInt(),
+    subtotal: json['subtotal'] as String,
+  );
+}
+
+class CartResponse {
+  final int id;
+  final String total;
+  final String estado;
+  final String actualizadoEn;
+  final String expiresAt;
+  final List<CartDetail> detalles;
+
+  CartResponse({
+    required this.id,
+    required this.total,
+    required this.estado,
+    required this.actualizadoEn,
+    required this.expiresAt,
+    required this.detalles,
+  });
+
+  factory CartResponse.fromJson(Map<String, dynamic> json) => CartResponse(
+    id: (json['id'] as num).toInt(),
+    total: json['total'] as String,
+    estado: json['estado'] as String,
+    actualizadoEn: json['actualizado_en'] as String,
+    expiresAt: json['expires_at'] as String,
+    detalles: (json['detalles'] as List<dynamic>)
+        .map((e) => CartDetail.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+// Payload para sincronizar carrito
+class CartSyncItemPayload {
+  final int productId;
+  final int quantity;
+  CartSyncItemPayload({required this.productId, required this.quantity});
+
+  Map<String, dynamic> toJson() => {
+    'productId': productId,
+    'quantity': quantity,
+  };
+}
+
+class CartSyncPayload {
+  final List<CartSyncItemPayload> items;
+  CartSyncPayload({required this.items});
+
+  Map<String, dynamic> toJson() => {
+    'items': items.map((e) => e.toJson()).toList(),
+  };
 }

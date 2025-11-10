@@ -73,6 +73,27 @@ class ApiService {
     return 'Error ${response.statusCode}: ${response.reasonPhrase ?? 'Operacion fallida'}';
   }
 
+  // ===================== CARRITO (API) =====================
+
+  Future<CartResponse> fetchCurrentCart() async {
+    final res = await _client.get(
+      _uri('carritos/actual/'),
+      headers: _headers(),
+    );
+    final data = _decode(res) as Map<String, dynamic>;
+    return CartResponse.fromJson(data);
+  }
+
+  Future<CartResponse> syncCart(CartSyncPayload payload) async {
+    final res = await _client.post(
+      _uri('carritos/actual/'),
+      headers: _headers(),
+      body: jsonEncode(payload.toJson()),
+    );
+    final data = _decode(res) as Map<String, dynamic>;
+    return CartResponse.fromJson(data);
+  }
+
   Future<List<Product>> fetchProducts() async {
     final response = await _client.get(_uri('productos/'), headers: _headers());
     final data = _decode(response) as List<dynamic>;
